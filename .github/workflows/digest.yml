@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install praw requests
+        run: pip install praw openai
 
       - name: Run digest
         env:
