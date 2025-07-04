@@ -46,13 +46,15 @@ Reddit post:
 Summary:
 •"""
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt.strip()}],
+            messages=[
+                {"role": "user", "content": prompt.strip()}
+            ],
             temperature=0.7,
             max_tokens=250
         )
-        return response['choices'][0]['message']['content'].strip()
+        return response.choices[0].message.content.strip()
     except Exception as e:
         return f"❌ Summary failed: {str(e)}"
 
