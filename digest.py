@@ -1,13 +1,11 @@
 import os
-import requests
+import openai
 import praw
 import datetime as dt
 from pathlib import Path
-from hashlib import sha1
 
-# Hugging Face model (more reliable summarizer)
-HF_API = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
-HF_HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
+# OpenAI API Key
+openai.api_key = os.environ["OPENAI_API_KEY"]
 
 # Reddit login
 reddit = praw.Reddit(
@@ -15,12 +13,12 @@ reddit = praw.Reddit(
     client_secret=os.environ["REDDIT_CLIENT_SECRET"],
     username=os.environ["REDDIT_USERNAME"],
     password=os.environ["REDDIT_PASSWORD"],
-    user_agent="saved-summary-digest"
+    user_agent="saved-summary-digest-gpt4"
 )
 
 # Settings
 MAX_POSTS = 25
-MAX_INPUT_CHARS = 1000
+MAX_INPUT_CHARS = 3000
 TOPIC_KEYWORDS = {
     "AI": ["machine learning", "chatgpt", "openai", "hugging face", "llm"],
     "Design": ["product design", "ux", "ui", "industrial", "portfolio"],
@@ -31,12 +29,6 @@ TOPIC_KEYWORDS = {
     "Philosophy": ["meaning", "truth", "consciousness", "buddhism", "stoic"]
 }
 
-def summarize(text):
-    response = requests.post(HF_API, headers=HF_HEADERS, json={"inputs": text})
-    if response.status_code == 200:
-        return response.json()[0]["summary_text"]
-    return "❌ Summary failed."
-
 def detect_topic(text):
     for topic, keywords in TOPIC_KEYWORDS.items():
         for kw in keywords:
@@ -44,7 +36,27 @@ def detect_topic(text):
                 return topic
     return "Misc"
 
-# Pull recent saved posts (limit to MAX_POSTS)
+def summarize_with_gpt(text):
+    prompt = f"""
+Summarize the following Reddit post in 2 clear bullet points, using natural language. Focus on extracting key takeaways or advice.
+
+Reddit post:
+\"\"\"{text.strip()}\"\"\"
+
+Summary:
+•"""
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt.strip()}],
+            temperature=0.7,
+            max_tokens=250
+        )
+        return response['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        return f"❌ Summary failed: {str(e)}"
+
+# Get saved posts
 since = dt.datetime.utcnow() - dt.timedelta(days=365)
 saved = [
     i for i in reddit.user.me().saved(limit=MAX_POSTS)
@@ -56,20 +68,22 @@ out_dir = Path("digests")
 out_dir.mkdir(exist_ok=True)
 digest_path = out_dir / f"{today} Reddit Digest.md"
 
-# Prepare post groups
 grouped = {}
 
 for post in saved:
     text = (post.title or "") + "\n" + getattr(post, "selftext", "")
-    summary = summarize(text[:MAX_INPUT_CHARS])
+    if len(text.strip()) < 40:
+        continue  # skip very short posts
+
+    summary = summarize_with_gpt(text[:MAX_INPUT_CHARS])
     topic = detect_topic(text)
 
-    item = f"**[{post.title}]({post.url})**  \n• {summary.strip()}"
+    item = f"**[{post.title}]({post.url})**  \n{summary}"
     if topic not in grouped:
         grouped[topic] = []
     grouped[topic].append(item)
 
-# Write digest
+# Write output
 with digest_path.open("w", encoding="utf-8") as f:
     f.write(f"# Reddit Digest – {today}\n\n")
     for topic, items in grouped.items():
