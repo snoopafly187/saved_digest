@@ -5,8 +5,8 @@ import datetime as dt
 from pathlib import Path
 from hashlib import sha1
 
-# Hugging Face model
-HF_API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+# Hugging Face model (more reliable summarizer)
+HF_API = "https://api-inference.huggingface.co/models/mrm8488/bert-small2bert-medium-finetuned-cnn_daily_mail"
 HF_HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
 
 # Reddit login
@@ -18,53 +18,61 @@ reddit = praw.Reddit(
     user_agent="saved-summary-digest"
 )
 
-# Get all saved posts in last 365 days
-since = dt.datetime.utcnow() - dt.timedelta(days=365)
-saved = [
-    i for i in reddit.user.me().saved(limit=None)
-    if hasattr(i, "title") and dt.datetime.utcfromtimestamp(i.created_utc) > since
-]
+# Settings
+MAX_POSTS = 25
+MAX_INPUT_CHARS = 1000
+TOPIC_KEYWORDS = {
+    "AI": ["machine learning", "chatgpt", "openai", "hugging face", "llm"],
+    "Design": ["product design", "ux", "ui", "industrial", "portfolio"],
+    "Finance": ["money", "invest", "retirement", "stock", "crypto"],
+    "Parenting": ["child", "toddler", "parent", "baby", "father", "mother"],
+    "Career": ["job", "resume", "interview", "promotion", "quit"],
+    "Health": ["fitness", "wellness", "mental", "exercise", "diet"],
+    "Philosophy": ["meaning", "truth", "consciousness", "buddhism", "stoic"]
+}
 
-# Helper to summarize
 def summarize(text):
     response = requests.post(HF_API, headers=HF_HEADERS, json={"inputs": text})
     if response.status_code == 200:
         return response.json()[0]["summary_text"]
-    return "Summary failed."
+    return "❌ Summary failed."
 
-# Create output folder
+def detect_topic(text):
+    for topic, keywords in TOPIC_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in text.lower():
+                return topic
+    return "Misc"
+
+# Pull recent saved posts (limit to MAX_POSTS)
+since = dt.datetime.utcnow() - dt.timedelta(days=365)
+saved = [
+    i for i in reddit.user.me().saved(limit=MAX_POSTS)
+    if hasattr(i, "title") and dt.datetime.utcfromtimestamp(i.created_utc) > since
+]
+
+today = dt.datetime.now().strftime("%Y-%m-%d")
 out_dir = Path("digests")
 out_dir.mkdir(exist_ok=True)
-
-# Group by date
-today = dt.datetime.now().strftime("%Y-%m-%d")
 digest_path = out_dir / f"{today} Reddit Digest.md"
 
-existing = {}
-if digest_path.exists():
-    for line in digest_path.read_text().splitlines():
-        if line.startswith("## "):
-            key = line[3:].strip()
-            existing[key] = []
+# Prepare post groups
+grouped = {}
+
+for post in saved:
+    text = (post.title or "") + "\n" + getattr(post, "selftext", "")
+    summary = summarize(text[:MAX_INPUT_CHARS])
+    topic = detect_topic(text)
+
+    item = f"**[{post.title}]({post.url})**  \n• {summary.strip()}"
+    if topic not in grouped:
+        grouped[topic] = []
+    grouped[topic].append(item)
 
 # Write digest
 with digest_path.open("w", encoding="utf-8") as f:
     f.write(f"# Reddit Digest – {today}\n\n")
-    for post in saved:
-        key = post.subreddit.display_name
-        body = (post.title or "") + "\n" + getattr(post, "selftext", "")
-        content_id = sha1((post.title + body).encode()).hexdigest()
-
-        if key not in existing:
-            existing[key] = []
-
-        # skip if already seen
-        if content_id in existing[key]:
-            continue
-
-        summary = summarize(body[:1000])
-        existing[key].append(content_id)
-
-        f.write(f"## {key}\n")
-        f.write(f"**[{post.title}]({post.url})**  \n")
-        f.write(f"{summary}\n\n")
+    for topic, items in grouped.items():
+        f.write(f"## {topic}\n")
+        for item in items:
+            f.write(item + "\n\n")
