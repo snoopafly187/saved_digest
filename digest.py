@@ -5,7 +5,7 @@ import datetime as dt
 from pathlib import Path
 
 # OpenAI v1.0+ client setup
-client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+client = openai.Client(api_key=os.environ["OPENAI_API_KEY"])
 
 # Reddit login
 reddit = praw.Reddit(
