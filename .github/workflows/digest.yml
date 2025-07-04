@@ -1,0 +1,39 @@
+name: Reddit Digest
+
+on:
+  schedule:
+    - cron: "0 7 * * *"  # every day at 7:00 UTC
+  workflow_dispatch:      # allow manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install praw requests
+
+      - name: Run digest
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+        run: python digest.py
+
+      - name: Commit output
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add digests/*.md || true
+          git commit -m "Add Reddit digest" || true
+          git push
