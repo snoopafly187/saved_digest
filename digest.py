@@ -4,8 +4,8 @@ import praw
 import datetime as dt
 from pathlib import Path
 
-# OpenAI API Key
-openai.api_key = os.environ["OPENAI_API_KEY"]
+# OpenAI v1.0+ client setup
+client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 # Reddit login
 reddit = praw.Reddit(
