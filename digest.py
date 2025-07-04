@@ -6,7 +6,7 @@ from pathlib import Path
 from hashlib import sha1
 
 # Hugging Face model (more reliable summarizer)
-HF_API = "https://api-inference.huggingface.co/models/mrm8488/bert-small2bert-medium-finetuned-cnn_daily_mail"
+HF_API = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
 HF_HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
 
 # Reddit login
