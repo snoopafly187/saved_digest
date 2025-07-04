@@ -58,12 +58,13 @@ Summary:
     except Exception as e:
         return f"❌ Summary failed: {str(e)}"
 
-# Get saved posts
-since = dt.datetime.utcnow() - dt.timedelta(days=365)
+# Get saved posts (no date filter, for testing)
 saved = [
     i for i in reddit.user.me().saved(limit=MAX_POSTS)
-    if hasattr(i, "title") and dt.datetime.utcfromtimestamp(i.created_utc) > since
+    if hasattr(i, "title")
 ]
+
+print(f"Found {len(saved)} saved posts")
 
 today = dt.datetime.now().strftime("%Y-%m-%d")
 out_dir = Path("digests")
@@ -74,8 +75,12 @@ grouped = {}
 
 for post in saved:
     text = (post.title or "") + "\n" + getattr(post, "selftext", "")
-    if len(text.strip()) < 40:
-        continue  # skip very short posts
+    print(f"Processing: {post.title}")
+
+    # Skip if text is literally empty or blank
+    if not text.strip():
+        print("Skipped: empty text")
+        continue
 
     summary = summarize_with_gpt(text[:MAX_INPUT_CHARS])
     topic = detect_topic(text)
@@ -92,3 +97,5 @@ with digest_path.open("w", encoding="utf-8") as f:
         f.write(f"## {topic}\n")
         for item in items:
             f.write(item + "\n\n")
+
+print("Digest complete.")
