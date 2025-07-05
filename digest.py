@@ -55,5 +55,22 @@ content_for_gpt = "\n\n".join(post_texts)
 messages = [
     {
         "role": "system",
-        "content": """You are a research assistant. You are given a list of Reddit threads 
-with their titles and top comments. Your task is
+        "content": (
+            "You are a research assistant. You are given a list of Reddit threads with their titles and top comments. "
+            "Your task is to extract insights, identify major themes, and summarize them in concise, categorized Markdown format. "
+            "Structure the output for Obsidian. Use clear section headers (##) for each theme. "
+            "Group similar threads together under one section when possible. Avoid speculation — only summarize what's there."
+        ),
+    },
+    {
+        "role": "user",
+        "content": content_for_gpt,
+    },
+]
+
+# Call OpenAI
+response = requests.post(
+    "https://api.openai.com/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "OpenAI-Project": OPENAI_PROJECT_ID,
