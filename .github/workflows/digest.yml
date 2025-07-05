@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     env:
-      OPENAI_API_KEY_B64: ${{ secrets.OPENAI_API_KEY_B64 }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
