@@ -4,7 +4,7 @@ import praw
 import datetime as dt
 from pathlib import Path
 
-client = openai.OpenAI(api_key="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")
+client = openai.OpenAI(api_key="OPENAI_API_KEY")
 
 # Reddit login
 reddit = praw.Reddit(
