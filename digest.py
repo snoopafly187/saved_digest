@@ -4,10 +4,8 @@ import praw
 import datetime as dt
 from pathlib import Path
 
-import base64
-
-decoded_key = base64.b64decode(os.environ["OPENAI_API_KEY_B64"]).decode("utf-8")
-client = openai.Client(api_key=decoded_key)
+# OpenAI v1.0+ client setup
+client = openai.Client(api_key=os.environ["OPENAI_API_KEY"])
 
 # Reddit login
 reddit = praw.Reddit(
@@ -60,7 +58,7 @@ Summary:
     except Exception as e:
         return f"❌ Summary failed: {str(e)}"
 
-# Get saved posts (no date filter, for testing)
+# Get saved posts
 saved = [
     i for i in reddit.user.me().saved(limit=MAX_POSTS)
     if hasattr(i, "title")
@@ -79,7 +77,6 @@ for post in saved:
     text = (post.title or "") + "\n" + getattr(post, "selftext", "")
     print(f"Processing: {post.title}")
 
-    # Skip if text is literally empty or blank
     if not text.strip():
         print("Skipped: empty text")
         continue
@@ -88,9 +85,7 @@ for post in saved:
     topic = detect_topic(text)
 
     item = f"**[{post.title}]({post.url})**  \n{summary}"
-    if topic not in grouped:
-        grouped[topic] = []
-    grouped[topic].append(item)
+    grouped.setdefault(topic, []).append(item)
 
 # Write output
 with digest_path.open("w", encoding="utf-8") as f:
