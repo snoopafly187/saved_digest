@@ -55,7 +55,5 @@ content_for_gpt = "\n\n".join(post_texts)
 messages = [
     {
         "role": "system",
-        "content": (
-            "You are a research assistant. You are given a list of Reddit threads "
-            "with their titles and top comments. Your task is to extract insights, "
-            "identify major themes, and summarize them in concise, categorized
+        "content": """You are a research assistant. You are given a list of Reddit threads 
+with their titles and top comments. Your task is
