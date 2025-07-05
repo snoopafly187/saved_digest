@@ -1,44 +1,41 @@
 name: Reddit Digest
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 7 * * *"  # every day at 7:00 UTC
-  workflow_dispatch:      # allow manual trigger
+    - cron: '0 14 * * *'  # Every day at 2 PM UTC
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_PROJECT_ID: ${{ secrets.OPENAI_PROJECT_ID }}
+      REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+      REDDIT_SECRET: ${{ secrets.REDDIT_SECRET }}
+      REDDIT_USER_AGENT: reddit-digest-script
 
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install praw openai --upgrade --pre
+          python -m pip install --upgrade pip
+          pip install requests pyyaml praw
 
-      - name: Run digest
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
-          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Run Reddit Digest
         run: python digest.py
 
-      - name: Commit output
+      - name: Commit Digest
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add digests/*.md || true
-          git commit -m "Add Reddit digest" || true
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add digests/
+          git commit -m "🤖 Add daily digest"
           git push
