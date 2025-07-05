@@ -21,7 +21,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install praw openai
+        run: |
+          pip install --upgrade pip
+          pip install praw openai --upgrade --pre
 
       - name: Run digest
         env:
