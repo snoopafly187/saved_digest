@@ -11,7 +11,12 @@ jobs:
     permissions:
       contents: write
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY_B64: ${{ secrets.OPENAI_API_KEY_B64 }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+      REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
 
     steps:
       - name: Checkout repo
@@ -26,12 +31,6 @@ jobs:
         run: pip install praw openai
 
       - name: Run digest
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
-          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
         run: python digest.py
 
       - name: Commit output
