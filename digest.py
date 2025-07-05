@@ -31,50 +31,44 @@ reddit = praw.Reddit(
     user_agent=REDDIT_USER_AGENT,
 )
 
-# Fetch top posts
-posts = reddit.subreddit(SUBREDDIT).hot(limit=LIMIT)
+# Fetch posts and top comments
 post_texts = []
-for post in posts:
-    if not post.stickied:
-        post_texts.append(f"Title: {post.title}\n{post.selftext[:300]}")
 
-content = "\n\n".join(post_texts)
+for post in reddit.subreddit(SUBREDDIT).hot(limit=LIMIT):
+    if post.stickied:
+        continue
 
-# Query OpenAI
+    post.comments.replace_more(limit=0)
+    top_comments = [
+        comment.body.strip()
+        for comment in post.comments[:3]
+        if hasattr(comment, "body") and comment.body.strip()
+    ]
+
+    comments_joined = "\n".join(f"- {comment}" for comment in top_comments)
+    thread_text = f"### {post.title}\n{comments_joined}\n"
+    post_texts.append(thread_text)
+
+content_for_gpt = "\n\n".join(post_texts)
+
+# Build GPT prompt
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "You are a research assistant. You are given a list of Reddit threads "
+            "with their titles and top comments. Your task is to extract insights, "
+            "identify major themes, and summarize them in concise, categorized Markdown format. "
+            "Structure the output for Obsidian. Use clear section headers (##) for each theme. "
+            "Group similar threads together under one section when possible. Avoid speculation — only summarize what's there."
+        ),
+    },
+    {
+        "role": "user",
+        "content": content_for_gpt,
+    },
+]
+
+# Call OpenAI
 response = requests.post(
-    "https://api.openai.com/v1/chat/completions",
-    headers={
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "OpenAI-Project": OPENAI_PROJECT_ID,
-        "Content-Type": "application/json"
-    },
-    json={
-        "model": "gpt-4o",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant who summarizes Reddit posts into a digest."
-            },
-            {
-                "role": "user",
-                "content": content
-            }
-        ],
-        "temperature": 0.7,
-    },
-)
-
-if response.status_code != 200:
-    print("❌ Summary failed:")
-    print(response.status_code, response.text)
-    exit(1)
-
-summary = response.json()["choices"][0]["message"]["content"]
-
-# Save digest
-timestamp = datetime.now().strftime("%Y-%m-%d")
-digest_path = DIGEST_DIR / f"digest_{SUBREDDIT}_{timestamp}.txt"
-with open(digest_path, "w", encoding="utf-8") as f:
-    f.write(summary)
-
-print(f"✅ Digest saved to {digest_path}")
+    "https://api.openai.com/v1/chat/c
