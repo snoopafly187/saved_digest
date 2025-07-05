@@ -1,8 +1,2 @@
-email:
-  enable: false           # change to true only if using Gmail app password
-  from:  "you@example.com"
-  to:    "you@example.com"
-
-obsidian_path: "digests"  # folder where the summaries will go
-
-topics: ["AI", "Design", "Finance"]
+subreddit: AskReddit
+limit: 5
