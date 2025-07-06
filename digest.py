@@ -74,3 +74,28 @@ response = requests.post(
     headers={
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "OpenAI-Project": OPENAI_PROJECT_ID,
+        "Content-Type": "application/json",
+    },
+    json={
+        "model": "gpt-4o",
+        "messages": messages,
+        "temperature": 0.5,
+    },
+)
+
+if response.status_code != 200:
+    print("❌ Summary failed:")
+    print(response.status_code, response.text)
+    exit(1)
+
+markdown_digest = response.json()["choices"][0]["message"]["content"]
+
+# Save to markdown
+timestamp = datetime.now().strftime("%Y-%m-%d")
+filename = f"digest_{SUBREDDIT}_{timestamp}.md"
+digest_path = DIGEST_DIR / filename
+
+with open(digest_path, "w", encoding="utf-8") as f:
+    f.write(markdown_digest)
+
+print(f"✅ Digest saved to {digest_path}")
