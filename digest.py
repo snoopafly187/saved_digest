@@ -1,101 +1,119 @@
 import os
 import requests
 import yaml
-from datetime import datetime
+import time
+import datetime
+from dotenv import load_dotenv
+from praw import Reddit
+from prawcore.exceptions import PrawcoreException
 from pathlib import Path
-import praw
 
-# Load config
-with open("config.yml", "r") as f:
+load_dotenv(override=True)
+
+SCRIPT_DIR = Path.cwd()  # Replaces __file__ for Codespaces and notebooks
+
+yaml_path = SCRIPT_DIR / "config.yml"
+if not yaml_path.exists():
+    raise FileNotFoundError("Missing config.yml file. Please create one with valid users.")
+
+with open(yaml_path, "r") as f:
     config = yaml.safe_load(f)
 
-SUBREDDIT = config.get("subreddit", "AskReddit")
-LIMIT = config.get("limit", 5)
-DIGEST_DIR = Path("digests")
-DIGEST_DIR.mkdir(exist_ok=True)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_PROJECT_ID = os.getenv("OPENAI_PROJECT_ID", "").strip()
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "").strip()
+REDDIT_SECRET = os.getenv("REDDIT_SECRET", "").strip()
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "").strip()
 
-# Load secrets
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_PROJECT_ID = os.getenv("OPENAI_PROJECT_ID")
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_SECRET = os.getenv("REDDIT_SECRET")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "reddit-digest-script")
+required_values = {
+    "OPENAI_API_KEY": OPENAI_API_KEY,
+    "OPENAI_PROJECT_ID": OPENAI_PROJECT_ID,
+    "REDDIT_CLIENT_ID": REDDIT_CLIENT_ID,
+    "REDDIT_SECRET": REDDIT_SECRET,
+    "REDDIT_USER_AGENT": REDDIT_USER_AGENT
+}
 
-if not all([OPENAI_API_KEY, OPENAI_PROJECT_ID, REDDIT_CLIENT_ID, REDDIT_SECRET]):
-    raise ValueError("Missing required API keys or secrets.")
+missing_keys = [key for key, val in required_values.items() if not val]
+if missing_keys:
+    raise ValueError(f"Missing required API keys or secrets: {', '.join(missing_keys)}")
 
-# Initialize Reddit
-reddit = praw.Reddit(
+reddit = Reddit(
     client_id=REDDIT_CLIENT_ID,
     client_secret=REDDIT_SECRET,
-    user_agent=REDDIT_USER_AGENT,
+    user_agent=REDDIT_USER_AGENT
 )
 
-# Fetch posts and top comments
-post_texts = []
-
-for post in reddit.subreddit(SUBREDDIT).hot(limit=LIMIT):
-    if post.stickied:
+saved_posts = []
+for username in config.get("users", []):
+    try:
+        user = reddit.redditor(username)
+        for post in user.saved(limit=config.get("max_posts", 20)):
+            if hasattr(post, "title") and hasattr(post, "selftext"):
+                saved_posts.append({
+                    "title": post.title,
+                    "selftext": post.selftext,
+                    "url": f"https://www.reddit.com{post.permalink}"
+                })
+    except PrawcoreException:
         continue
 
-    post.comments.replace_more(limit=0)
-    top_comments = [
-        comment.body.strip()
-        for comment in post.comments[:3]
-        if hasattr(comment, "body") and comment.body.strip()
-    ]
+# Exit early if no posts were found
+if not saved_posts:
+    print("⚠️ No saved posts found. Exiting.")
+    exit()
 
-    comments_joined = "\n".join(f"- {comment}" for comment in top_comments)
-    thread_text = f"### {post.title}\n{comments_joined}\n"
-    post_texts.append(thread_text)
+date_str = datetime.date.today().isoformat()
+thread_count = len(saved_posts)
+print(f"📊 Found {thread_count} posts from {len(config.get('users', []))} users")
 
-content_for_gpt = "\n\n".join(post_texts)
+post_bodies = "\n\n".join([
+    f"Title: {p['title']}\nBody: {p['selftext']}" for p in saved_posts
+])
 
-# Build GPT prompt
-messages = [
+prompt = f"""Here are {thread_count} Reddit posts saved by a user on {date_str}. Please:
+
+- Group related posts into clear categories
+- Provide a brief but contextually clear summary of each group
+- Write in clean Obsidian-style Markdown
+- At the top, summarize how many posts were processed, what date, and how many categories were found
+- Include a reference list of original post titles and links at the bottom
+
+Posts:
+{post_bodies}"""
+
+gpt_messages = [
     {
         "role": "system",
-        "content": (
-            "You are a research assistant. You are given a list of Reddit threads with their titles and top comments. "
-            "Your task is to extract insights, identify major themes, and summarize them in concise, categorized Markdown format. "
-            "Structure the output for Obsidian. Use clear section headers (##) for each theme. "
-            "Group similar threads together under one section when possible. Avoid speculation — only summarize what's there."
-        ),
+        "content": "You are a research assistant. Group similar Reddit posts together, identify major themes, and summarize them in a way that preserves context and clarity."
     },
     {
         "role": "user",
-        "content": content_for_gpt,
-    },
+        "content": prompt
+    }
 ]
 
-# Call OpenAI
 response = requests.post(
     "https://api.openai.com/v1/chat/completions",
     headers={
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "OpenAI-Project": OPENAI_PROJECT_ID,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     },
     json={
         "model": "gpt-4o",
-        "messages": messages,
-        "temperature": 0.5,
-    },
+        "messages": gpt_messages,
+        "temperature": 0.5
+    }
 )
 
-if response.status_code != 200:
-    print("❌ Summary failed:")
-    print(response.status_code, response.text)
-    exit(1)
+response.raise_for_status()
+completion = response.json()["choices"][0]["message"]["content"]
 
-markdown_digest = response.json()["choices"][0]["message"]["content"]
+output_dir = SCRIPT_DIR / "digests"
+output_dir.mkdir(exist_ok=True)
 
-# Save to markdown
-timestamp = datetime.now().strftime("%Y-%m-%d")
-filename = f"digest_{SUBREDDIT}_{timestamp}.md"
-digest_path = DIGEST_DIR / filename
+output_file = output_dir / f"digest_{config['subreddit']}_{date_str}.md"
+with open(output_file, "w", encoding="utf-8") as f:
+    f.write(completion)
 
-with open(digest_path, "w", encoding="utf-8") as f:
-    f.write(markdown_digest)
-
-print(f"✅ Digest saved to {digest_path}")
+print(f"✅ Digest saved to {output_file}")
