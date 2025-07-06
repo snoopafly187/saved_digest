@@ -1,2 +1,4 @@
 subreddit: AskReddit
 limit: 5
+users:
+  - yorrick_brown
