@@ -5,13 +5,18 @@ from datetime import datetime
 from pathlib import Path
 import praw
 
-# Load config
-with open("config.yml", "r") as f:
+# Determine script directory so relative paths work even when executed elsewhere
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# Load config relative to this file
+with open(SCRIPT_DIR / "config.yml", "r") as f:
     config = yaml.safe_load(f)
 
 SUBREDDIT = config.get("subreddit", "AskReddit")
 LIMIT = config.get("limit", 5)
-DIGEST_DIR = Path("digests")
+
+# Ensure the digest directory exists relative to this script
+DIGEST_DIR = SCRIPT_DIR / "digests"
 DIGEST_DIR.mkdir(exist_ok=True)
 
 # Load secrets
