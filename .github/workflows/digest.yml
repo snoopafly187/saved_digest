@@ -1,41 +1,12 @@
-name: Reddit Digest
+name: Test Reddit Digest
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 14 * * *'  # Every day at 2 PM UTC
 
 jobs:
-  build:
+  test-runner:
     runs-on: ubuntu-latest
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_PROJECT_ID: ${{ secrets.OPENAI_PROJECT_ID }}
-      REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-      REDDIT_SECRET: ${{ secrets.REDDIT_SECRET }}
-      REDDIT_USER_AGENT: reddit-digest-script
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests pyyaml praw
-
-      - name: Run Reddit Digest
-        run: python digest.py
-
-      - name: Commit Digest
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add digests/
-          git commit -m "🤖 Add daily digest"
-          git push
+      - name: Say hello
+        run: echo "👋 Runner is live!"
