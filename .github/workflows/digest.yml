@@ -48,7 +48,7 @@ jobs:
 
       # 6) Upload as an artifact for easy download
       - name: Upload digest artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: reddit-digest
           path: digests/*.md
