@@ -1,4 +1,3 @@
-subreddit: AskReddit
-limit: 10
 users:
-  - yorrick_brown
+  - your_reddit_username
+max_posts: 20
