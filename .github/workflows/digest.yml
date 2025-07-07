@@ -1,10 +1,10 @@
 name: Reddit Digest
 
-# Run on manual dispatch and (optionally) every morning at 8 AM UTC
+# Trigger manually or on a daily schedule
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'   # adjust or remove if you don't need a schedule
+    - cron: '0 8 * * *'  # every day at 08:00 UTC (adjust or remove as needed)
 
 jobs:
   reddit-digest:
@@ -27,7 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyyaml praw requests
 
-      # 4. Run your digest script
+      # 4. Run your Python digest script
       - name: Generate Reddit Digest
         env:
           OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
@@ -38,12 +38,24 @@ jobs:
         run: |
           python digest.py
 
-      # 5. (Optional) Commit & push the generated markdown
+      # 5. Commit & push any new or updated digests/*.md files
       - name: Commit & push digest
+        shell: bash
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add digests/*.md
-          git diff --quiet || git commit -m "chore: update Reddit digest for $(date +'%Y-%m-%d')"
-          git push
-        # only if you actually want the markdown back in the repo
+
+          # Only proceed if there are any digest files
+          if compgen -G "digests/*.md" > /dev/null; then
+            git add digests/*.md
+
+            # Only commit if there are staged changes
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: update Reddit digest for $(date +'%Y-%m-%d')"
+              git push
+            else
+              echo "▶️ No changes in digests/*.md, skipping commit"
+            fi
+          else
+            echo "▶️ No digests/*.md files found, skipping commit"
+          fi
