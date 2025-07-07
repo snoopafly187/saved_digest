@@ -62,4 +62,75 @@ def chunk_list(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i : i + size]
 
-def call_openai_
+def call_openai_with_backoff(payload, max_retries=5):
+    """
+    Sends the `payload` to OpenAI with exponential backoff on 429s.
+    """
+    delay = 1
+    for attempt in range(1, max_retries + 1):
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {env['OPENAI_API_KEY']}",
+                "OpenAI-Project":    env["OPENAI_PROJECT_ID"],
+                "Content-Type":      "application/json"
+            },
+            json=payload,
+        )
+        if resp.status_code == 429 and attempt < max_retries:
+            print(f"⚠️ Rate-limited, retrying in {delay}s… (attempt {attempt})")
+            time.sleep(delay)
+            delay *= 2
+            continue
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    raise RuntimeError("❌ Failed after multiple retries")
+
+# === BUILD & CALL IN SMALLER CHUNKS ===
+date_str = datetime.date.today().isoformat()
+chunks = list(chunk_list(saved_posts, 10))   # 10 posts per batch
+partial_summaries = []
+
+for idx, chunk in enumerate(chunks, start=1):
+    prompt_posts = "\n\n".join(
+        f"Title: {p['title']}\nBody: {p['selftext']}" for p in chunk
+    )
+    prompt = f"""Here are {len(chunk)} saved Reddit posts (batch {idx}/{len(chunks)}) on {date_str}. Please:
+- Group related posts into clear categories
+- Summarize each group in Obsidian-style Markdown
+- Label this section "Batch {idx}"
+
+Posts:
+{prompt_posts}"""
+    approx_tokens = len(prompt) // 4
+    print(f"🛠️ Sending batch {idx}/{len(chunks)} to OpenAI (≈ {approx_tokens} tokens)…")
+    summary = call_openai_with_backoff({
+        "model": "gpt-4",
+        "messages": [
+            {"role": "system", "content": "You are a research assistant."},
+            {"role": "user",   "content": prompt}
+        ],
+        "temperature": 0.5,
+    })
+    partial_summaries.append(summary)
+    time.sleep(1)  # short pause to ease pressure on the API
+
+# === AGGREGATE FINAL DIGEST ===
+header = f"# Reddit Digest ({len(saved_posts)} posts) — {date_str}\n\n"
+body   = "\n\n".join(partial_summaries)
+links  = "\n".join(f"- [{p['title']}]({p['url']})" for p in saved_posts)
+
+final_md = f"""{header}{body}
+
+---
+
+## All Post Links
+{links}
+"""
+
+# === SAVE OUTPUT ===
+out_dir = SCRIPT_DIR / "digests"
+out_dir.mkdir(exist_ok=True)
+out_file = out_dir / f"digest_{date_str}.md"
+out_file.write_text(final_md, encoding="utf-8")
+print(f"✅ Digest saved to {out_file}")
