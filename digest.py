@@ -8,13 +8,15 @@ from pathlib import Path
 
 # --- Config and env ---
 SCRIPT_DIR = Path.cwd()
+# you can now remove max_posts from config.yml if you like
 cfg_file = SCRIPT_DIR / "config.yml"
 if not cfg_file.exists():
     raise FileNotFoundError("Missing config.yml")
+# we’re no longer using config.get("max_posts") here, but you can keep
+# users/other settings in config.yml for future extensions
 with open(cfg_file) as f:
     config = yaml.safe_load(f)
 
-# Required env
 env_vars = {
     "OPENAI_API_KEY":    os.getenv("OPENAI_API_KEY", "").strip(),
     "OPENAI_PROJECT_ID": os.getenv("OPENAI_PROJECT_ID", "").strip(),
@@ -24,8 +26,7 @@ env_vars = {
     "REDDIT_USERNAME":   os.getenv("REDDIT_USERNAME", "").strip(),
     "REDDIT_PASSWORD":   os.getenv("REDDIT_PASSWORD", "").strip(),
 }
-
-missing = [k for k, v in env_vars.items() if not v]
+missing = [k for k,v in env_vars.items() if not v]
 if missing:
     raise ValueError("Missing env vars: " + ", ".join(missing))
 
@@ -38,16 +39,16 @@ reddit = Reddit(
     password=env_vars["REDDIT_PASSWORD"],
 )
 
-# --- Fetch *your* saved posts only ---
+# --- Fetch *all* your saved posts ---
 saved_posts = []
 try:
-    for post in reddit.user.me().saved(limit=config.get("max_posts", 20)):
+    # limit=None tells PRAW to page until Reddit’s 1000-item cap
+    for post in reddit.user.me().saved(limit=None):
         if not getattr(post, "title", None):
             continue
-        body = post.selftext or "[no self-text]"
         saved_posts.append({
             "title": post.title,
-            "selftext": body,
+            "selftext": post.selftext or "[no self-text]",
             "url": f"https://reddit.com{post.permalink}"
         })
 except PrawcoreException as e:
@@ -61,11 +62,10 @@ if not saved_posts:
 date_str = datetime.date.today().isoformat()
 thread_count = len(saved_posts)
 post_bodies = "\n\n".join(
-    f"Title: {p['title']}\nBody: {p['selftext']}" 
+    f"Title: {p['title']}\nBody: {p['selftext']}"
     for p in saved_posts
 )
-
-prompt = f"""Here are {thread_count} Reddit posts you saved on {date_str}. Please:
+prompt = f"""Here are {thread_count} Reddit posts you’ve saved on {date_str}. Please:
 - Group related posts into clear categories
 - Summarize in Obsidian-style Markdown
 - At the top, state count, date, and category count
