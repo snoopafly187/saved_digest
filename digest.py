@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import yaml
 import datetime
@@ -6,18 +7,15 @@ from praw import Reddit
 from prawcore.exceptions import PrawcoreException
 from pathlib import Path
 
-# --- Config and env ---
+# === CONFIG & ENV SETUP ===
 SCRIPT_DIR = Path.cwd()
-# you can now remove max_posts from config.yml if you like
 cfg_file = SCRIPT_DIR / "config.yml"
 if not cfg_file.exists():
     raise FileNotFoundError("Missing config.yml")
-# we’re no longer using config.get("max_posts") here, but you can keep
-# users/other settings in config.yml for future extensions
-with open(cfg_file) as f:
-    config = yaml.safe_load(f)
 
-env_vars = {
+config = yaml.safe_load(cfg_file.read_text())
+
+env = {
     "OPENAI_API_KEY":    os.getenv("OPENAI_API_KEY", "").strip(),
     "OPENAI_PROJECT_ID": os.getenv("OPENAI_PROJECT_ID", "").strip(),
     "REDDIT_CLIENT_ID":  os.getenv("REDDIT_CLIENT_ID", "").strip(),
@@ -26,23 +24,22 @@ env_vars = {
     "REDDIT_USERNAME":   os.getenv("REDDIT_USERNAME", "").strip(),
     "REDDIT_PASSWORD":   os.getenv("REDDIT_PASSWORD", "").strip(),
 }
-missing = [k for k,v in env_vars.items() if not v]
+missing = [k for k,v in env.items() if not v]
 if missing:
     raise ValueError("Missing env vars: " + ", ".join(missing))
 
-# --- Reddit client (script auth) ---
+# === REDDIT CLIENT (SCRIPT AUTH) ===
 reddit = Reddit(
-    client_id=env_vars["REDDIT_CLIENT_ID"],
-    client_secret=env_vars["REDDIT_SECRET"],
-    user_agent=env_vars["REDDIT_USER_AGENT"],
-    username=env_vars["REDDIT_USERNAME"],
-    password=env_vars["REDDIT_PASSWORD"],
+    client_id=env["REDDIT_CLIENT_ID"],
+    client_secret=env["REDDIT_SECRET"],
+    user_agent=env["REDDIT_USER_AGENT"],
+    username=env["REDDIT_USERNAME"],
+    password=env["REDDIT_PASSWORD"],
 )
 
-# --- Fetch *all* your saved posts ---
+# === FETCH ALL SAVED POSTS ===
 saved_posts = []
 try:
-    # limit=None tells PRAW to page until Reddit’s 1000-item cap
     for post in reddit.user.me().saved(limit=None):
         if not getattr(post, "title", None):
             continue
@@ -58,50 +55,80 @@ if not saved_posts:
     print("⚠️ No saved posts found. Exiting.")
     exit()
 
-# --- Build prompt ---
+print(f"✅ Retrieved {len(saved_posts)} saved posts")
+
+# === HELPERS ===
+def chunk_list(lst, size):
+    for i in range(0, len(lst), size):
+        yield lst[i : i + size]
+
+def call_openai_with_backoff(payload, max_retries=5):
+    delay = 1
+    for attempt in range(1, max_retries + 1):
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {env['OPENAI_API_KEY']}",
+                "OpenAI-Project": env["OPENAI_PROJECT_ID"],
+                "Content-Type": "application/json"
+            },
+            json=payload,
+        )
+        if resp.status_code == 429 and attempt < max_retries:
+            print(f"⚠️ Rate-limited, retrying in {delay}s… (attempt {attempt})")
+            time.sleep(delay)
+            delay *= 2
+            continue
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    raise RuntimeError("❌ Failed after multiple retries")
+
+# === BUILD & CALL IN CHUNKS ===
 date_str = datetime.date.today().isoformat()
-thread_count = len(saved_posts)
-post_bodies = "\n\n".join(
-    f"Title: {p['title']}\nBody: {p['selftext']}"
-    for p in saved_posts
-)
-prompt = f"""Here are {thread_count} Reddit posts you’ve saved on {date_str}. Please:
+chunks = list(chunk_list(saved_posts, 50))
+partial_summaries = []
+
+for idx, chunk in enumerate(chunks, start=1):
+    prompt_posts = "\n\n".join(
+        f"Title: {p['title']}\nBody: {p['selftext']}" for p in chunk
+    )
+    prompt = f"""Here are {len(chunk)} saved Reddit posts (batch {idx}/{len(chunks)}) on {date_str}. Please:
 - Group related posts into clear categories
-- Summarize in Obsidian-style Markdown
-- At the top, state count, date, and category count
-- List titles+links at the bottom
+- Summarize each group in Obsidian-style Markdown
+- Label this section "Batch {idx}"
+- Do NOT list post links here, we’ll append them at the end
 
 Posts:
-{post_bodies}"""
-
-print("🛠️ Prompt preview:", prompt[:300].replace("\n"," "))
-print(f"📋 Approx tokens: {len(prompt)//4}")
-
-# --- Call OpenAI ---
-resp = requests.post(
-    "https://api.openai.com/v1/chat/completions",
-    headers={
-        "Authorization": f"Bearer {env_vars['OPENAI_API_KEY']}",
-        "OpenAI-Project": env_vars["OPENAI_PROJECT_ID"],
-        "Content-Type": "application/json"
-    },
-    json={
+{prompt_posts}"""
+    print(f"🛠️ Sending batch {idx}/{len(chunks)} to OpenAI (≈ {len(prompt)//4} tokens)…")
+    summary = call_openai_with_backoff({
         "model": "gpt-4",
         "messages": [
             {"role": "system", "content": "You are a research assistant."},
             {"role": "user",   "content": prompt}
         ],
-        "temperature": 0.5
-    }
-)
-resp.raise_for_status()
-completion = resp.json()["choices"][0]["message"]["content"]
+        "temperature": 0.5,
+    })
+    partial_summaries.append(summary)
 
-# --- Save output ---
+# === AGGREGATE FINAL DIGEST ===
+header = f"# Reddit Digest ({len(saved_posts)} posts) — {date_str}\n\n"
+body = "\n\n".join(partial_summaries)
+
+# Append links at bottom
+links = "\n".join(f"- [{p['title']}]({p['url']})" for p in saved_posts)
+
+final_md = f"""{header}{body}
+
+---
+
+## All Post Links
+{links}
+"""
+
+# === SAVE OUTPUT ===
 out_dir = SCRIPT_DIR / "digests"
 out_dir.mkdir(exist_ok=True)
 out_file = out_dir / f"digest_{date_str}.md"
-with open(out_file, "w", encoding="utf-8") as f:
-    f.write(completion)
-
+out_file.write_text(final_md, encoding="utf-8")
 print(f"✅ Digest saved to {out_file}")
