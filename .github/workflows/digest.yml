@@ -1,10 +1,9 @@
 name: Reddit Digest
 
-# Trigger manually or on a daily schedule at 08:00 UTC
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 8 * * *'  # every day 08:00 UTC
 
 jobs:
   reddit-digest:
@@ -33,8 +32,7 @@ jobs:
           REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
           REDDIT_USERNAME:   ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD:   ${{ secrets.REDDIT_PASSWORD }}
-        run: |
-          python digest.py
+        run: python digest.py
 
       - name: List generated digests
         run: |
@@ -52,6 +50,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           if compgen -G "digests/*.md" > /dev/null; then
             git add digests/*.md
             if ! git diff --cached --quiet; then
