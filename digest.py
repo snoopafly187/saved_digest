@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import requests
 import yaml
 import datetime
@@ -12,7 +13,6 @@ SCRIPT_DIR = Path.cwd()
 cfg_file = SCRIPT_DIR / "config.yml"
 if not cfg_file.exists():
     raise FileNotFoundError("Missing config.yml")
-
 config = yaml.safe_load(cfg_file.read_text())
 
 env = {
@@ -62,11 +62,12 @@ def chunk_list(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i : i + size]
 
-def call_openai_with_backoff(payload, max_retries=5):
+def call_openai_with_backoff(payload, max_retries=6):
     """
-    Sends the `payload` to OpenAI with exponential backoff on 429s.
+    Send the `payload` to OpenAI, retrying on 429 or 5xx up to max_retries.
+    Uses exponential backoff with jitter.
     """
-    delay = 1
+    backoff = 1.0
     for attempt in range(1, max_retries + 1):
         resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
@@ -77,18 +78,21 @@ def call_openai_with_backoff(payload, max_retries=5):
             },
             json=payload,
         )
-        if resp.status_code == 429 and attempt < max_retries:
-            print(f"⚠️ Rate-limited, retrying in {delay}s… (attempt {attempt})")
-            time.sleep(delay)
-            delay *= 2
+        if resp.status_code == 429 or 500 <= resp.status_code < 600:
+            # transient error: retry
+            wait = backoff + random.uniform(0, backoff * 0.1)
+            print(f"⚠️ Got {resp.status_code}, retrying in {wait:.1f}s… (attempt {attempt})")
+            time.sleep(wait)
+            backoff = min(backoff * 2, 30)
             continue
+        # other 4xx or 2xx
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
-    raise RuntimeError("❌ Failed after multiple retries")
+    raise RuntimeError(f"❌ OpenAI: failed after {max_retries} attempts (last status {resp.status_code})")
 
 # === BUILD & CALL IN SMALLER CHUNKS ===
 date_str = datetime.date.today().isoformat()
-chunks = list(chunk_list(saved_posts, 10))   # 10 posts per batch
+chunks = list(chunk_list(saved_posts, 10))
 partial_summaries = []
 
 for idx, chunk in enumerate(chunks, start=1):
@@ -103,7 +107,7 @@ for idx, chunk in enumerate(chunks, start=1):
 Posts:
 {prompt_posts}"""
     approx_tokens = len(prompt) // 4
-    print(f"🛠️ Sending batch {idx}/{len(chunks)} to OpenAI (≈ {approx_tokens} tokens)…")
+    print(f"🛠️ Sending batch {idx}/{len(chunks)} (≈ {approx_tokens} tokens)…")
     summary = call_openai_with_backoff({
         "model": "gpt-4",
         "messages": [
@@ -113,7 +117,7 @@ Posts:
         "temperature": 0.5,
     })
     partial_summaries.append(summary)
-    time.sleep(1)  # short pause to ease pressure on the API
+    time.sleep(1)
 
 # === AGGREGATE FINAL DIGEST ===
 header = f"# Reddit Digest ({len(saved_posts)} posts) — {date_str}\n\n"
