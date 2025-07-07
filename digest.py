@@ -38,21 +38,20 @@ reddit = Reddit(
     password=env_vars["REDDIT_PASSWORD"],
 )
 
-# --- Fetch saved posts ---
+# --- Fetch *your* saved posts only ---
 saved_posts = []
-for username in config.get("users", []):
-    try:
-        for post in reddit.redditor(username).saved(limit=config.get("max_posts", 20)):
-            if not getattr(post, "title", None):
-                continue
-            body = post.selftext or "[no self-text]"
-            saved_posts.append({
-                "title": post.title,
-                "selftext": body,
-                "url": f"https://reddit.com{post.permalink}"
-            })
-    except PrawcoreException as e:
-        print(f"⚠️ Skipping {username}: {e}")
+try:
+    for post in reddit.user.me().saved(limit=config.get("max_posts", 20)):
+        if not getattr(post, "title", None):
+            continue
+        body = post.selftext or "[no self-text]"
+        saved_posts.append({
+            "title": post.title,
+            "selftext": body,
+            "url": f"https://reddit.com{post.permalink}"
+        })
+except PrawcoreException as e:
+    print(f"⚠️ Error fetching saved posts: {e}")
 
 if not saved_posts:
     print("⚠️ No saved posts found. Exiting.")
@@ -66,7 +65,7 @@ post_bodies = "\n\n".join(
     for p in saved_posts
 )
 
-prompt = f"""Here are {thread_count} Reddit posts saved on {date_str}. Please:
+prompt = f"""Here are {thread_count} Reddit posts you saved on {date_str}. Please:
 - Group related posts into clear categories
 - Summarize in Obsidian-style Markdown
 - At the top, state count, date, and category count
@@ -79,28 +78,23 @@ print("🛠️ Prompt preview:", prompt[:300].replace("\n"," "))
 print(f"📋 Approx tokens: {len(prompt)//4}")
 
 # --- Call OpenAI ---
-try:
-    resp = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {env_vars['OPENAI_API_KEY']}",
-            "OpenAI-Project": env_vars["OPENAI_PROJECT_ID"],
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4",
-            "messages": [
-                {"role": "system", "content": "You are a research assistant."},
-                {"role": "user",   "content": prompt}
-            ],
-            "temperature": 0.5
-        }
-    )
-    resp.raise_for_status()
-except requests.HTTPError as e:
-    print("❌ OpenAI API error:", resp.status_code, resp.text)
-    raise
-
+resp = requests.post(
+    "https://api.openai.com/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {env_vars['OPENAI_API_KEY']}",
+        "OpenAI-Project": env_vars["OPENAI_PROJECT_ID"],
+        "Content-Type": "application/json"
+    },
+    json={
+        "model": "gpt-4",
+        "messages": [
+            {"role": "system", "content": "You are a research assistant."},
+            {"role": "user",   "content": prompt}
+        ],
+        "temperature": 0.5
+    }
+)
+resp.raise_for_status()
 completion = resp.json()["choices"][0]["message"]["content"]
 
 # --- Save output ---
