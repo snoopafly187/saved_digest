@@ -1,61 +1,113 @@
-name: Reddit Digest
+import os
+import requests
+import yaml
+import datetime
+from praw import Reddit
+from prawcore.exceptions import PrawcoreException
+from pathlib import Path
 
-# Trigger manually or on a daily schedule
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 8 * * *'  # every day at 08:00 UTC (adjust or remove as needed)
+# --- Config and env ---
+SCRIPT_DIR = Path.cwd()
+cfg_file = SCRIPT_DIR / "config.yml"
+if not cfg_file.exists():
+    raise FileNotFoundError("Missing config.yml")
+with open(cfg_file) as f:
+    config = yaml.safe_load(f)
 
-jobs:
-  reddit-digest:
-    runs-on: ubuntu-latest
+# Required env
+env_vars = {
+    "OPENAI_API_KEY":    os.getenv("OPENAI_API_KEY", "").strip(),
+    "OPENAI_PROJECT_ID": os.getenv("OPENAI_PROJECT_ID", "").strip(),
+    "REDDIT_CLIENT_ID":  os.getenv("REDDIT_CLIENT_ID", "").strip(),
+    "REDDIT_SECRET":     os.getenv("REDDIT_SECRET", "").strip(),
+    "REDDIT_USER_AGENT": os.getenv("REDDIT_USER_AGENT", "").strip(),
+    "REDDIT_USERNAME":   os.getenv("REDDIT_USERNAME", "").strip(),
+    "REDDIT_PASSWORD":   os.getenv("REDDIT_PASSWORD", "").strip(),
+}
 
-    steps:
-      # 1. Check out the repo
-      - name: Checkout code
-        uses: actions/checkout@v3
+missing = [k for k, v in env_vars.items() if not v]
+if missing:
+    raise ValueError("Missing env vars: " + ", ".join(missing))
 
-      # 2. Set up Python
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+# --- Reddit client (script auth) ---
+reddit = Reddit(
+    client_id=env_vars["REDDIT_CLIENT_ID"],
+    client_secret=env_vars["REDDIT_SECRET"],
+    user_agent=env_vars["REDDIT_USER_AGENT"],
+    username=env_vars["REDDIT_USERNAME"],
+    password=env_vars["REDDIT_PASSWORD"],
+)
 
-      # 3. Install dependencies
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml praw requests
+# --- Fetch saved posts ---
+saved_posts = []
+for username in config.get("users", []):
+    try:
+        for post in reddit.redditor(username).saved(limit=config.get("max_posts", 20)):
+            if not getattr(post, "title", None):
+                continue
+            body = post.selftext or "[no self-text]"
+            saved_posts.append({
+                "title": post.title,
+                "selftext": body,
+                "url": f"https://reddit.com{post.permalink}"
+            })
+    except PrawcoreException as e:
+        print(f"⚠️ Skipping {username}: {e}")
 
-      # 4. Run your Python digest script
-      - name: Generate Reddit Digest
-        env:
-          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_PROJECT_ID: ${{ secrets.OPENAI_PROJECT_ID }}
-          REDDIT_CLIENT_ID:  ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_SECRET:     ${{ secrets.REDDIT_SECRET }}
-          REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
-        run: |
-          python digest.py
+if not saved_posts:
+    print("⚠️ No saved posts found. Exiting.")
+    exit()
 
-      # 5. Commit & push any new or updated digests/*.md files
-      - name: Commit & push digest
-        shell: bash
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+# --- Build prompt ---
+date_str = datetime.date.today().isoformat()
+thread_count = len(saved_posts)
+post_bodies = "\n\n".join(
+    f"Title: {p['title']}\nBody: {p['selftext']}" 
+    for p in saved_posts
+)
 
-          # Only proceed if there are any digest files
-          if compgen -G "digests/*.md" > /dev/null; then
-            git add digests/*.md
+prompt = f"""Here are {thread_count} Reddit posts saved on {date_str}. Please:
+- Group related posts into clear categories
+- Summarize in Obsidian-style Markdown
+- At the top, state count, date, and category count
+- List titles+links at the bottom
 
-            # Only commit if there are staged changes
-            if ! git diff --cached --quiet; then
-              git commit -m "chore: update Reddit digest for $(date +'%Y-%m-%d')"
-              git push
-            else
-              echo "▶️ No changes in digests/*.md, skipping commit"
-            fi
-          else
-            echo "▶️ No digests/*.md files found, skipping commit"
-          fi
+Posts:
+{post_bodies}"""
+
+print("🛠️ Prompt preview:", prompt[:300].replace("\n"," "))
+print(f"📋 Approx tokens: {len(prompt)//4}")
+
+# --- Call OpenAI ---
+try:
+    resp = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {env_vars['OPENAI_API_KEY']}",
+            "OpenAI-Project": env_vars["OPENAI_PROJECT_ID"],
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4",
+            "messages": [
+                {"role": "system", "content": "You are a research assistant."},
+                {"role": "user",   "content": prompt}
+            ],
+            "temperature": 0.5
+        }
+    )
+    resp.raise_for_status()
+except requests.HTTPError as e:
+    print("❌ OpenAI API error:", resp.status_code, resp.text)
+    raise
+
+completion = resp.json()["choices"][0]["message"]["content"]
+
+# --- Save output ---
+out_dir = SCRIPT_DIR / "digests"
+out_dir.mkdir(exist_ok=True)
+out_file = out_dir / f"digest_{date_str}.md"
+with open(out_file, "w", encoding="utf-8") as f:
+    f.write(completion)
+
+print(f"✅ Digest saved to {out_file}")
