@@ -85,7 +85,7 @@ def call_openai(payload, max_retries=5):
         return resp.json()["choices"][0]["message"]["content"]
     raise RuntimeError(f"❌ OpenAI failed after {max_retries} attempts (last {last_status})")
 
-# === BATCH & SUMMARIZE WITH ENHANCED PROMPT ===
+# === BATCH & SUMMARIZE WITH DETAILED EXTRACTION ===
 date_str = datetime.date.today().isoformat()
 batches = list(chunk_list(saved_posts, 10))
 summaries = []
@@ -93,25 +93,25 @@ summaries = []
 for idx, batch in enumerate(batches, start=1):
     post_block = "\n\n".join(f"Title: {p['title']}\nBody: {p['selftext']}" for p in batch)
 
+    # ←—— UPDATED PROMPT STARTS HERE ——→
     prompt = f"""Here are {len(batch)} saved Reddit posts (batch {idx}/{len(batches)}) on {date_str}. Please:
 
 1. **Group** these posts into clear, descriptive categories.
 2. For **each category**, write:
-   - A **concise heading** (Obsidian-style `## Heading`)
-   - **3–5 bullet points** that capture:
-     - The **central question** or problem being discussed
-     - The **key arguments**, pros/cons or tips shared
-     - Any **notable examples**, statistics, or user anecdotes
-     - A **memorable quote** or phrasing if present
-3. At the end of each category, include a one-sentence **“so what?” takeaway** explaining why this discussion matters.
+   - A **heading** (`## Category Name`)
+   - A **brief overview** sentence.
+   - **Top 3–5 specifics** mentioned in this category (e.g. actual book titles, tool names, nootropic substances, life hacks, etc.).
+   - **Key insights** or pros/cons around each specific.
+   - A one-sentence **“so what?” takeaway** explaining why these specifics matter.
 
-Do **not** list individual titles here. We will append the title + link index later.
+_Do not_ list every title here—we’ll append the full title+link list at the end.
 
 ---
 
 **Posts:**  
 {post_block}
 """
+    # ←—— UPDATED PROMPT ENDS HERE ——→
 
     approx_tokens = len(prompt) // 4
     print(f"🛠️ Batch {idx}/{len(batches)} → ≈ {approx_tokens} tokens")
