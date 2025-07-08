@@ -7,6 +7,16 @@ jobs:
   reddit-digest:
     runs-on: ubuntu-latest
 
+    # Inject all seven secrets so digest.py can authenticate locally & to Reddit/OpenAI
+    env:
+      OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_PROJECT_ID: ${{ secrets.OPENAI_PROJECT_ID }}
+      REDDIT_CLIENT_ID:  ${{ secrets.REDDIT_CLIENT_ID }}
+      REDDIT_SECRET:     ${{ secrets.REDDIT_SECRET }}
+      REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+      REDDIT_USERNAME:   ${{ secrets.REDDIT_USERNAME }}
+      REDDIT_PASSWORD:   ${{ secrets.REDDIT_PASSWORD }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
