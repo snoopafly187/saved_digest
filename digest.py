@@ -37,18 +37,27 @@ reddit = Reddit(
     password=env["REDDIT_PASSWORD"],
 )
 
-# === FETCH UP TO 200 SAVED POSTS ===
+# === FETCH UP TO 200 SAVED POSTS + TOP COMMENT ===
 saved_posts = []
-try:
-    for post in reddit.user.me().saved(limit=200):
-        if getattr(post, "title", None):
-            saved_posts.append({
-                "title": post.title,
-                "selftext": post.selftext or "[no self-text]",
-                "url": f"https://reddit.com{post.permalink}"
-            })
-except PrawcoreException as e:
-    print(f"⚠️ Error fetching saved posts: {e}")
+for post in reddit.user.me().saved(limit=200):
+    if not getattr(post, "title", None):
+        continue
+    try:
+        post.comments.replace_more(limit=0)
+        top = max(post.comments, key=lambda c: c.score) if post.comments else None
+        top_text = top.body if top else "[no comments]"
+        top_score = top.score if top else 0
+    except Exception:
+        top_text = "[error fetching comment]"
+        top_score = 0
+
+    saved_posts.append({
+        "title": post.title,
+        "selftext": post.selftext or "[no self-text]",
+        "url": f"https://reddit.com{post.permalink}",
+        "top_comment": top_text,
+        "top_score": top_score
+    })
 
 if not saved_posts:
     print("⚠️ No saved posts found. Exiting.")
@@ -63,8 +72,7 @@ def chunk_list(lst, size):
 
 def call_openai(payload, max_retries=5):
     backoff = 1.0
-    last_status = None
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, max_retries+1):
         resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers={
@@ -74,36 +82,51 @@ def call_openai(payload, max_retries=5):
             },
             json=payload,
         )
-        last_status = resp.status_code
-        if resp.status_code == 429 or 500 <= resp.status_code < 600:
-            wait = backoff + random.uniform(0, backoff * 0.1)
+        if resp.status_code in (429,) or 500 <= resp.status_code < 600:
+            wait = backoff + random.uniform(0, backoff*0.1)
             print(f"⚠️ {resp.status_code}, retrying in {wait:.1f}s (attempt {attempt})")
             time.sleep(wait)
-            backoff = min(backoff * 2, 30)
+            backoff = min(backoff*2, 30)
             continue
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
-    raise RuntimeError(f"❌ OpenAI failed after {max_retries} attempts (last {last_status})")
+    raise RuntimeError(f"OpenAI failed after {max_retries} attempts")
 
-# === BATCH & SUMMARIZE WITH DETAILED EXTRACTION ===
+# === BATCH & PROMPT WITH PERSONALIZATION & NEXT ACTIONS ===
 date_str = datetime.date.today().isoformat()
 batches = list(chunk_list(saved_posts, 10))
-summaries = []
+all_summaries = []
 
 for idx, batch in enumerate(batches, start=1):
-    post_block = "\n\n".join(f"Title: {p['title']}\nBody: {p['selftext']}" for p in batch)
+    post_block = ""
+    for i, p in enumerate(batch, start=1):
+        post_block += (
+            f"### Post {i}\n"
+            f"**Title:** {p['title']}\n"
+            f"**Body:** {p['selftext']}\n"
+            f"**Top Comment (score {p['top_score']}):** {p['top_comment']}\n\n"
+        )
 
-    prompt = f"""Here are {len(batch)} saved Reddit posts (batch {idx}/{len(batches)}) on {date_str}. Please:
+    prompt = f"""SYSTEM: You are a research assistant helping a prompt-engineering hobbyist, Obsidian power user, and podcast creator.
 
-1. **Group** these posts into clear, descriptive categories.
-2. For **each category**, write:
-   - A **heading** (`## Category Name`)
-   - A **brief overview** sentence.
-   - **Top 3–5 specifics** mentioned in this category (e.g. actual book titles, tool names, nootropic substances, life hacks, etc.).
-   - **Key insights** or pros/cons around each specific.
-   - A one-sentence **“so what?” takeaway** explaining why these specifics matter.
+USER: We're processing **batch {idx}/{len(batches)}** of saved Reddit posts on **{date_str}**.
 
-_Do not_ list every title here—we’ll append the full title+link list at the end.
+**TASKS:**
+1. **Group** these posts into **3–5** categories.
+   - 🔥 Mark any category about prompt engineering or AI/tools with a fire emoji.
+
+2. For **each category**, produce:
+   - A heading (`## Category Name`).
+   - A **2–3 sentence overview**.
+   - **5–7 bullet points** that include:
+     - **Specifics** (book titles, prompt examples, nootropic names, etc.) [cite …].
+     - **Top comment** insight for each specific [cite …].
+     - A one-sentence **“so what?” takeaway**.
+     - A **Next action:** a concrete step the user can take tomorrow.
+
+3. At the very end, under **## For You**, suggest **2–3 project ideas** or next steps tailored to the user’s interests.
+
+_Do not list_ individual titles here—we’ll append them with links in References.
 
 ---
 
@@ -111,41 +134,30 @@ _Do not_ list every title here—we’ll append the full title+link list at the 
 {post_block}
 """
 
-    approx_tokens = len(prompt) // 4
-    print(f"🛠️ Batch {idx}/{len(batches)} → ≈ {approx_tokens} tokens")
-
+    print(f"🛠️ Sending batch {idx}/{len(batches)} (~{len(prompt)//4} tokens)…")
     payload = {
         "model": "gpt-4",
         "messages": [
-            {"role": "system", "content": "You are a research assistant."},
-            {"role": "user",   "content": prompt}
+            {"role":"system", "content":"You are a research assistant helping a prompt-engineering hobbyist, Obsidian power user, and podcast creator."},
+            {"role":"user",   "content":prompt}
         ],
-        "temperature": 0.5,
+        "temperature": 0.5
     }
 
     try:
-        result = call_openai(payload)
+        batch_summary = call_openai(payload)
     except Exception as e:
-        print(f"❌ Batch {idx} failed: {e}. Skipping.")
-        summaries.append(f"**Batch {idx} skipped due to API errors**\n")
-        time.sleep(2)
+        print(f"❌ Batch {idx} failed: {e}")
+        all_summaries.append(f"**Batch {idx} skipped due to API errors**\n")
         continue
 
-    summaries.append(result)
+    all_summaries.append(batch_summary)
     time.sleep(1)
 
-# === ASSEMBLE FINAL DIGEST ===
+# === ASSEMBLE FINAL MD ===
 header = f"# Reddit Digest ({len(saved_posts)} posts) — {date_str}\n\n"
-body   = "\n\n".join(summaries)
-links  = "\n".join(f"- [{p['title']}]({p['url']})" for p in saved_posts)
-
-final_md = f"""{header}{body}
-
----
-
-## All Post Links
-{links}
-"""
+body   = "\n\n---\n\n".join(all_summaries)
+final_md = f"{header}{body}\n"
 
 out_dir = SCRIPT_DIR / "digests"
 out_dir.mkdir(exist_ok=True)
