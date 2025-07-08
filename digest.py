@@ -93,7 +93,6 @@ summaries = []
 for idx, batch in enumerate(batches, start=1):
     post_block = "\n\n".join(f"Title: {p['title']}\nBody: {p['selftext']}" for p in batch)
 
-    # ←—— UPDATED PROMPT STARTS HERE ——→
     prompt = f"""Here are {len(batch)} saved Reddit posts (batch {idx}/{len(batches)}) on {date_str}. Please:
 
 1. **Group** these posts into clear, descriptive categories.
@@ -111,7 +110,6 @@ _Do not_ list every title here—we’ll append the full title+link list at the 
 **Posts:**  
 {post_block}
 """
-    # ←—— UPDATED PROMPT ENDS HERE ——→
 
     approx_tokens = len(prompt) // 4
     print(f"🛠️ Batch {idx}/{len(batches)} → ≈ {approx_tokens} tokens")
