@@ -92,7 +92,7 @@ def call_openai(payload, max_retries=5):
         return resp.json()["choices"][0]["message"]["content"]
     raise RuntimeError(f"OpenAI failed after {max_retries} attempts")
 
-# === BATCH & PROMPT WITH PERSONALIZATION & NEXT ACTIONS ===
+# === BATCH & PROMPT WITH DEEP-DIVE BULLETS ===
 date_str = datetime.date.today().isoformat()
 batches = list(chunk_list(saved_posts, 10))
 all_summaries = []
@@ -118,15 +118,17 @@ USER: We're processing **batch {idx}/{len(batches)}** of saved Reddit posts on *
 2. For **each category**, produce:
    - A heading (`## Category Name`).
    - A **2–3 sentence overview**.
-   - **5–7 bullet points** that include:
-     - **Specifics** (book titles, prompt examples, nootropic names, etc.) [cite …].
-     - **Top comment** insight for each specific [cite …].
-     - A one-sentence **“so what?” takeaway**.
-     - A **Next action:** a concrete step the user can take tomorrow.
+   - **5–7 bullet points**, each of which must:
+     1. Begin with the post’s **title** as a Markdown link—`[Title](URL)`.
+     2. Show the OP’s **initial prompt** exactly as they wrote it.
+     3. Show the **top upvoted comment** text.
+     4. Summarize the **key insight** or takeaway from that comment.
+     5. End with a one-sentence **“so what?” takeaway** explaining why this matters.
+     6. Add a **Next action:** one concrete step to try tomorrow.
 
 3. At the very end, under **## For You**, suggest **2–3 project ideas** or next steps tailored to the user’s interests.
 
-_Do not list_ individual titles here—we’ll append them with links in References.
+_Do not_ list every title here—we will auto‐append a full **References** section with all titles and links after the batches.
 
 ---
 
@@ -156,7 +158,7 @@ _Do not list_ individual titles here—we’ll append them with links in Referen
 
 # === ASSEMBLE FINAL MD ===
 header = f"# Reddit Digest ({len(saved_posts)} posts) — {date_str}\n\n"
-body   = "\n\n---\n\n".join(all_summaries)
+body = "\n\n---\n\n".join(all_summaries)
 final_md = f"{header}{body}\n"
 
 out_dir = SCRIPT_DIR / "digests"
